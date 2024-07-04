@@ -37,6 +37,8 @@ BfButton btn(BfButton::STANDALONE_DIGITAL, ADJUSTMENT_PIN_SW , true, LOW);
 
 #define MAX_A 5 // If using 30A version this is the max value change to 20 for 20A or 5 for 5B
 
+#define AVG 10 // average samples of amp reading
+
 SerialCommand sCmd;
 // These code snippets was found posted on an Amazon review page lol Thank Richard M H
 int threshold = 0;
@@ -56,11 +58,6 @@ int relay_calibration_time = 0;
 long relay_calibration_min = 0;
 long relay_calibration_max = 0;
 
-// hysteresis implimentation to prevent flickr
-int hys_margin = 2; // prevent flickr
-int hys_threshold = 4;
-int hys_val = 0;
-bool hys_on = false;
 
 bool streamGraph = false;
 bool debug = false;
@@ -69,17 +66,7 @@ float in, out;
 void(* resetFunc) (void) = 0; //declare reset function @ address 0
 int margin = 0;
 
-void analyze_thresh()
-{
-  if (hys_val >= (hys_threshold + hys_margin) )
-  {
-    hys_on = true;
-  }
-  if (hys_val <= (hys_threshold - hys_margin) )
-  {
-    hys_on = false;
-  }
-}
+
 void cmdHelp(const char *command)
 {
   Serial.println("Commands:");
@@ -110,7 +97,7 @@ void cmdStreamGraph(const char *command)
     Serial.println("");         
     Serial.print("Current"); 
     Serial.print(","); 
-    Serial.println("Activation");         
+    Serial.println("Activation");   
   }
 }
 
@@ -223,8 +210,8 @@ void pressHandler( BfButton *btn, BfButton::press_pattern_t pattern)
      case BfButton::DOUBLE_PRESS:
       if (debug) {
         Serial.println("Calibrating to current power value");              
-      }
-      delay(1000); // let things rest before starting
+      }      
+      //delay(1000); // let things rest before starting;
       calibration_time = millis();
       relayCalibrated = false;
       relay_calibration_time = millis();
@@ -264,6 +251,7 @@ void thresholdInt(){
       threshold = 0;
     }
   }  
+  delay(200); // a cheap trick to avoid glitchy knobs
 }
 
 void blink()
@@ -283,22 +271,21 @@ void loop(){
     sCmd.readSerial();
   }
   int avg = 0;
-  for (int i=0; i < 30 ; i++)
+  for (int i=0; i < AVG ; i++)
   {
     avg += analogRead(HAL_PIN);
   }  
-  halvalue = ((avg / 30) - 512) - runtime_offset;
-  hys_val = halvalue;
-  analyze_thresh();
-  
-  
+  halvalue = abs(((avg / AVG) - 512) - runtime_offset);  
+    
   btn.read(); // Read button states and execute any events regarding its press states
   if (calibration_time > 0)
   {    
     if (relayCalibrated == false)
     {
+      int remaining = (relay_calibration_time + calibration_duration) - millis();
       digitalWrite(RELAY_PIN, HIGH);
       // find relay voltage offset first.
+      
       if (relay_calibration_min > halvalue || relay_calibration_min == 0)
       {
         relay_calibration_min = halvalue;
@@ -307,15 +294,21 @@ void loop(){
       {
         relay_calibration_max = halvalue;
       }
-      if ((relay_calibration_time + calibration_duration)  < millis()  )
+      if ( remaining <= 0)
       {
         relayoffset = relay_calibration_min;
         relayCalibrated = true;
         calibration_time = millis(); // set for next calibration round
         digitalWrite(RELAY_PIN, LOW);
+        if(debug)
+        {
+          Serial.print("Finished Relay voltage drop test Value found:");
+          Serial.println(relayoffset);
+        }
         delay(1000);
-      }
+      } 
     } else {
+      int remaining = (calibration_time + calibration_duration)  - millis();
       digitalWrite(RELAY_PIN, LOW);
       // Callibration has been initiated
       if (calibration_data_min > halvalue || calibration_data_min == 0)
@@ -327,7 +320,7 @@ void loop(){
         calibration_data_max = halvalue;
       }
       
-      if ((calibration_time + calibration_duration)  < millis()  )
+      if (remaining <= 0 )
       {
         int fluctation_band = calibration_data_max - calibration_data_min;
         // callibration completed
@@ -365,8 +358,8 @@ void loop(){
     oldthreshold = threshold;    
     if (debug)
     {            
-      //Serial.print("threshold value: ");      
-      //Serial.println(threshold);   
+      Serial.print("threshold value: ");      
+      Serial.println(threshold);   
         
     } 
   }
@@ -378,21 +371,21 @@ void loop(){
     Serial.print(",");
     Serial.println( threshold );
   }
+  
   if (calibration_time == 0)
   {
-    if (hys_on)
+    
+    if (halvalue >= threshold)
     {
-      if (halvalue >= threshold)
-      {
-        digitalWrite(RELAY_PIN, HIGH); // activate ( Normally Off )      
-        runtime_offset = relayoffset;
-        digitalWrite(LED_BUILTIN,HIGH);
-      } else {
-        digitalWrite(RELAY_PIN, LOW); // deactivate            
-        runtime_offset = 0;
-        digitalWrite(LED_BUILTIN,LOW);
-      }
+      digitalWrite(RELAY_PIN, HIGH); // activate ( Normally Off )      
+      runtime_offset = relayoffset;
+      digitalWrite(LED_BUILTIN,HIGH);
+    } else {
+      digitalWrite(RELAY_PIN, LOW); // deactivate            
+      runtime_offset = 0;
+      digitalWrite(LED_BUILTIN,LOW);
     }
+  
     //add a 10ms delay so the chip is not too busy and it still responds to the programmer
     delay(10);
   } else {
