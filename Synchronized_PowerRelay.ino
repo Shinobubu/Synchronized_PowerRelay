@@ -37,11 +37,9 @@ BfButton btn(BfButton::STANDALONE_DIGITAL, ADJUSTMENT_PIN_SW , true, LOW);
 
 #define MAX_A 5 // If using 30A version this is the max value change to 20 for 20A or 5 for 5B
 
-#define AVG 10 // average samples of amp reading
-
 SerialCommand sCmd;
 // These code snippets was found posted on an Amazon review page lol Thank Richard M H
-int threshold = 0;
+int threshold = 512; // max as default to force user to use auto calibration
 int relayoffset = 0; // activating the relay causes voltage drop account for this in the readings
 int runtime_offset = 0;
 int relay_on = false;
@@ -97,7 +95,11 @@ void cmdStreamGraph(const char *command)
     Serial.println("");         
     Serial.print("Current"); 
     Serial.print(","); 
-    Serial.println("Activation");   
+    Serial.print("Activation");   
+    Serial.print(",");
+    Serial.print("Hyst+");      
+    Serial.print(",");
+    Serial.println("Hyst-");
   }
 }
 
@@ -271,11 +273,11 @@ void loop(){
     sCmd.readSerial();
   }
   int avg = 0;
-  for (int i=0; i < AVG ; i++)
+  for (int i=0; i < 40 ; i++)
   {
     avg += analogRead(HAL_PIN);
   }  
-  halvalue = abs(((avg / AVG) - 512) - runtime_offset);  
+  halvalue = abs(((avg / 40) - 512) - runtime_offset);  
     
   btn.read(); // Read button states and execute any events regarding its press states
   if (calibration_time > 0)
